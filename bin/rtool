@@ -70,6 +70,7 @@ package rtool::lib {
                    is_subdirname
                    assert_subdirname
                    do_xxsystem
+                   do_xsystem
                    user_exists_on_host
                    run_ssh_command_capture
                    rsync_dir
@@ -119,6 +120,14 @@ package rtool::lib {
             xxsystem(@_)
         }
     }
+    sub do_xsystem {
+        if ($opt_dry or $verbose) {
+            xprintln "+ ", singlequote_sh_many(@_);
+        }
+        unless ($opt_dry) {
+            xsystem(@_)
+        }
+    }
     
     # Really wether we can log in (try to look for that, anyway).
     my %_user_host_exists; # cache
@@ -126,7 +135,7 @@ package rtool::lib {
         $_user_host_exists{$user}{$host} //= do {
             # Assume we *can* log in as root, so don't check that.
             $user eq "root" or
-                xsystem("ssh", "root\@$host",
+                do_xsystem("ssh", "root\@$host",
                         # hack, we only check that for non-root users
                         # which are presumably having their homes in
                         # the usual location.
