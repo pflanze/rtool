@@ -84,7 +84,7 @@ package rtool::lib {
     use Chj::xtmpfile;
     use Chj::xperlfunc ":all";
     use Chj::singlequote ":all";
-    
+
     sub is_username($v) {
         is_string($v) and $v=~ /^[a-zA-Z]\w*\z/
     }
@@ -128,7 +128,7 @@ package rtool::lib {
             xsystem(@_)
         }
     }
-    
+
     # Really wether we can log in (try to look for that, anyway).
     my %_user_host_exists; # cache
     sub user_exists_on_host($user, $host) {
@@ -311,7 +311,7 @@ package rtool::_GitrepoHandler {
             }
         }
     }
-    
+
     _END_
 }
 
@@ -327,7 +327,7 @@ package rtool::GitrepoHandler {
     sub do_post_update($self, $localpath) {
         # noop
     }
-    
+
     _END_
 }
 
