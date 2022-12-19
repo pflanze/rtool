@@ -139,7 +139,7 @@ package rtool::lib {
                         # hack, we only check that for non-root users
                         # which are presumably having their homes in
                         # the usual location.
-                        "test -d ".singlequote_sh(
+                        "test -e ".singlequote_sh(
                             "/home/$user/.ssh/authorized_keys")) == 0
         }
     }
