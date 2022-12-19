@@ -1,0 +1,428 @@
+#!/usr/bin/env perl
+
+my $copyright= <<'COPYRIGHT';
+# Copyright 2022 by Christian Jaeger <ch@christianjaeger.ch>
+# Published under the same terms as perl itself
+COPYRIGHT
+
+use strict;
+use utf8;
+use warnings;
+use warnings FATAL => 'uninitialized';
+use experimental 'signatures';
+
+my ($email_full)= $copyright=~ / by ([^\n]*)/s;
+
+my ($mydir, $myname);
+BEGIN {
+    $0=~ /(.*?)([^\/]+)\z/s or die "?";
+    ($mydir, $myname)=($1,$2);
+}
+
+use Getopt::Long;
+use FP::Show;
+use Chj::xperlfunc ":all";
+use Chj::singlequote ":all";
+#use Chj::ruse;
+#use Chj::Backtrace; 
+use FP::Repl; use FP::Repl::Trap; #
+
+my $config_path = "./config.pl";
+
+sub usage {
+    print STDERR map{"$_\n"} @_ if @_;
+    print "$myname action [hostnames]
+
+  Reads $config_path as Perl file (unsafe!).
+
+  If 'hostnames' is not given, takes config->{hosts}.
+
+  The only action supported so far is 'sync', which rechecks each
+  handler on every run and does clone when no local clone exists
+  already.
+
+  Must be run from the root of the Git repo that tracks the sync'ed
+  files and subrepositories.
+
+  Options:
+    --dry  do not carry out the action
+
+  ($email_full)
+";
+exit (@_ ? 1 : 0);
+}
+
+our $verbose=0;
+my $opt_dry;
+GetOptions("verbose"=> \$verbose,
+	   "help"=> sub{usage},
+	   "dry-run"=> \$opt_dry,
+	   ) or exit 1;
+usage unless @ARGV;
+
+package rtool::lib {
+    use Exporter "import";
+    our @EXPORT=qw(is_username
+                   assert_username
+                   is_path
+                   is_relpath
+                   is_nondotgit_path
+                   is_subdirname
+                   assert_subdirname
+                   do_xxsystem
+                   user_exists_on_host
+                   run_ssh_command_capture
+                   rsync_dir
+                   rsync_file
+                   array_of);
+
+    use FP::Predicates ":all";
+    use FP::Array qw(:all);
+    use FP::Show;
+    use Chj::IO::Command;
+    use Chj::xtmpfile;
+    use Chj::xperlfunc ":all";
+    use Chj::singlequote ":all";
+    
+    sub is_username($v) {
+        is_string($v) and $v=~ /^[a-zA-Z]\w*\z/
+    }
+    sub assert_username($v) {
+        is_username $v or die "not a username: ".show($v);
+    }
+
+    sub is_path($v) {
+        is_string($v) and not($v=~ m|\0|) and length $v
+    }
+    sub is_relpath($v) {
+        is_path($v) and not ($v=~ m|^/|)
+    }
+    sub assert_relpath($v) {
+        is_relpath($v) or die "not a relpath: ".show($v)
+    }
+    sub is_nondotgit_path($v) {
+        is_path($v) and not ($v=~ m|\.git\z|)
+    }
+    sub is_subdirname($v) {
+        is_path($v) and not($v=~ m|/|)
+    }
+    sub assert_subdirname($v) {
+        is_subdirname $v or die "not a subdirname: ".show($v);
+    }
+
+
+    sub do_xxsystem {
+        if ($opt_dry or $verbose) {
+            xprintln "+ ", singlequote_sh_many(@_);
+        }
+        unless ($opt_dry) {
+            xxsystem(@_)
+        }
+    }
+    
+    # Really wether we can log in (try to look for that, anyway).
+    my %_user_host_exists; # cache
+    sub user_exists_on_host($user, $host) {
+        $_user_host_exists{$user}{$host} //= do {
+            # Assume we *can* log in as root, so don't check that.
+            $user eq "root" or
+                xsystem("ssh", "root\@$host",
+                        # hack, we only check that for non-root users
+                        # which are presumably having their homes in
+                        # the usual location.
+                        "test -d ".singlequote_sh(
+                            "/home/$user/.ssh/authorized_keys")) == 0
+        }
+    }
+
+    sub run_ssh_command_capture($user, $host, $shellcmd, $outsubpath) {
+        my $in = Chj::IO::Command->new_sender(
+            "ssh", "$user\@$host", $shellcmd);
+        my $out = xtmpfile "$host/$outsubpath";
+        while (defined (my $line = $in->xreadline)) {
+            $out->xprint($line);
+        }
+        $in->xxfinish;
+        $out->xclose;
+        $out->xputback(0600);
+    }
+
+    # Includes --delete ! But that's normally what you want.
+    sub rsync_dir($user, $host, $remotepath, $subdirpath) {
+        assert_subdirname $subdirpath;
+        assert_username $user;
+        my $dir = "$host/$subdirpath";
+        mkdir $dir;
+        do_xxsystem("rsync",
+                    "-rlpt",
+                    "--delete",
+                    "-v",
+                    "$user\@$host:$remotepath/.",
+                    "$dir/.");
+    }
+
+    sub rsync_file($user, $host, $remotepath, $subpath) {
+        assert_relpath $subpath;
+        assert_username $user;
+        my $path = "$host/$subpath";
+        mkdir dirname $path;
+        do_xxsystem("rsync",
+                    "-pt", # -l ?
+                    # "--delete",
+                    "-v",
+                    "$user\@$host:$remotepath",
+                    $path);
+    }
+
+    # XX move to fperl if not there in newer version already
+    sub array_of($pred) {
+        sub ($v) {
+            is_array($v) and array_every($v, $pred)
+        }
+    }
+}
+#rtool::lib->import(qw(is_array));
+use FP::Predicates qw(is_array);
+
+
+# Handlers for various kinds of configuration
+
+package rtool::_Handler {
+    use FP::Struct [] => qw(FP::Struct::Show);
+    _END_
+}
+
+package rtool::CrontabHandler {
+    use FP::Predicates ":all";
+    use Chj::xperlfunc ":all";
+    rtool::lib->import;
+
+    use FP::Struct [] => qw(rtool::_Handler);
+
+    sub run ($self, $host) {
+        rsync_dir("root", $host, "/var/spool/cron/crontabs", "crontabs");
+    }
+    _END_
+}
+
+package rtool::ChjizeLogsHandler {
+    use FP::Predicates ":all";
+    rtool::lib->import;
+
+    use FP::Struct [] => qw(rtool::_Handler);
+
+    sub run ($self, $host) {
+        rsync_dir("root", $host, "/opt/chj/chjize/.log", "chjize-.log");
+        run_ssh_command_capture(
+            "root", $host, "TZ=Europe/Zurich ls -lrt /opt/chj/chjize/.log/",
+            "chjize-.log l.txt");
+    }
+    _END_
+}
+
+package rtool::BashhistoryHandler {
+    use FP::Predicates ":all";
+    rtool::lib->import;
+
+    use FP::Struct [
+        [\&is_username, "username"],
+        ] => qw(rtool::_Handler);
+
+    sub run ($self, $host) {
+        my $username = $self->username;
+        if (user_exists_on_host($username, $host)) {
+            rsync_file($username, $host, ".bash_history",
+                       "$username/.bash_history")
+        }
+    }
+    _END_
+}
+
+package rtool::DpkgSelectionsHandler {
+    use FP::Predicates ":all";
+    rtool::lib->import;
+
+    use FP::Struct [] => qw(rtool::_Handler);
+
+    sub run ($self, $host) {
+        run_ssh_command_capture(
+            "root", $host, "dpkg --get-selections", "selections")
+    }
+    _END_
+}
+
+
+package rtool::_GitrepoHandler {
+    use FP::Predicates ":all";
+    use Chj::xperlfunc ":all";
+    use FP::Show;
+    use Chj::singlequote 'singlequote_sh';
+    rtool::lib->import;
+
+    use FP::Struct [
+        [\&is_boolean, "required"],
+        [\&is_username, "username"],
+        ] => qw(rtool::_Handler);
+
+    sub run ($self, $host) {
+        my $username = $self->username;
+        my $remotepath = $self->remotepath;
+        my $localsubpath = $self->localsubpath;
+        my $localpath = $host . "/" . $localsubpath;
+        my $do_post_update = $self->can("do_post_update")
+            or die "missing implementation of do_post_update method";
+        if (-d $localpath) {
+            xxwaitpid xfork_(
+                sub {
+                    xchdir $localpath;
+                    xxsystem "git", "pull";
+                });
+            $do_post_update->($self, $localpath);
+        } else {
+            my $repo_exists_on_remote =
+                user_exists_on_host($username, $host) && do {
+                    my $shellcode =
+                        'test -d '.singlequote_sh("$remotepath/.git").
+                        ' && cd '.singlequote_sh($remotepath).
+                        ' && git rev-parse HEAD';
+                    warn "shellcode = <$shellcode>" if $verbose;
+                    my $in = Chj::IO::Command->new_combinedsender(
+                        "ssh", "$username\@$host", $shellcode);
+                    my $cnt = $in->xcontent;
+                    $in->xfinish == 0 and not $cnt=~ /unknown revision/
+            };
+            if ($self->required) {
+                $repo_exists_on_remote
+                    or die "repository is required but doesn't exist on the remote or has no HEAD: ".show($self);
+            }
+            if ($self->required or $repo_exists_on_remote) {
+                mkdir dirname $localpath;
+                xxsystem "git", "clone", "$username\@$host:$remotepath",
+                    $localpath;
+                $do_post_update->($self, $localpath);
+            }
+        }
+    }
+    
+    _END_
+}
+
+package rtool::GitrepoHandler {
+    use FP::Predicates ":all";
+    rtool::lib->import;
+
+    use FP::Struct [
+        [\&is_nondotgit_path, "remotepath"],
+        [\&is_relpath, "localsubpath"],
+        ] => qw(rtool::_GitrepoHandler);
+
+    sub do_post_update($self, $localpath) {
+        # noop
+    }
+    
+    _END_
+}
+
+package rtool::ScratchHandler {
+    use FP::Predicates ":all";
+    use Chj::xperlfunc ":all";
+    rtool::lib->import;
+
+    use FP::Struct [
+        ] => qw(rtool::_GitrepoHandler);
+
+    sub remotepath($self) {
+        "scratch"
+    }
+    sub localsubpath($self) {
+        $self->username . "/scratch"
+    }
+    
+    sub do_post_update($self, $localpath) {
+        xxwaitpid xfork_(
+            sub {
+                xchdir $localpath;
+                xxsystem "cj-gitmetadata", "restore";
+            });
+    }
+    _END_
+}
+
+my @handlernames= qw(
+    CrontabHandler
+    ChjizeLogsHandler
+    DpkgSelectionsHandler
+    GitrepoHandler
+    ScratchHandler
+    BashhistoryHandler
+    );
+for (@handlernames) {
+    "rtool::${_}::constructors"->import;
+}
+
+our %handlers= (
+    crontab => CrontabHandler(),
+    chjize => ChjizeLogsHandler(), # I am not retrieving the time stamps now.
+    # ^ XX does need cj-gitmetadata or ordering wouldn't be clear!!
+    dpkgselections=> DpkgSelectionsHandler(),
+    etc=> GitrepoHandler(1, "root", "/etc", "etc"),
+    scratch=> [
+        ScratchHandler(0, "root"),
+        ScratchHandler(0, "chris"),
+        ],
+    rootbin => GitrepoHandler(0, "root", "bin", "root/bin"),
+    # ^ really not require?
+    bashhistory=> [
+        BashhistoryHandler("root"),
+        BashhistoryHandler("chris"),
+    ],
+    users=>
+    # even though also other keys have user stuff, like bashhistory; shrug.
+    [
+        GitrepoHandler(0, "chris", "bin", "chris/bin"),
+    ],
+    );
+
+my $action = shift @ARGV;
+
+$action eq "sync"
+    or usage "only 'sync' is currently a supported action";
+
+-d ".git"
+    or usage "Missing directory .git, must be run from the root of a Git repository";
+
+my $config = require $config_path;
+
+my $hosts = @ARGV ? [@ARGV] : $config->{hosts};
+
+my %config_hosts = map { $_=> 1 } @{ $config->{hosts} };
+
+for my $host (@$hosts) {
+    xprintln "=== Host $host =====";
+    if (not $config_hosts{$host}) {
+        xprintln "WARNING: host '$host' is not configured in '$config_path'";
+    }
+    mkdir $host unless $opt_dry;
+    for my $key (sort keys %handlers) {
+        xprintln "--- $key -----";
+        my $hS= $handlers{$key};
+        my @hs= is_array($hS) ? @$hS : $hS;
+        for my $h (@hs) {
+            xprintln "  ", show($h);
+            # $log->xprintln(show($h)); for reproducibility (realworld testing)?
+            unless ($opt_dry) {
+                $h->run($host);
+            }
+        }
+    }
+}
+
+unless ($opt_dry) {
+    xxsystem "git", "add", ".";
+    xxsystem "cj-gitmetadata", "save";
+    xxsystem "git", "add", ".";
+    xxsystem "git", "commit", "-a", "-m",
+        "$myname sync ".singlequote_sh_many(@$hosts);
+}
+
+#repl;
