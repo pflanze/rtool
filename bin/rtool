@@ -349,7 +349,8 @@ package rtool::ScratchHandler {
         xxwaitpid xfork_(
             sub {
                 xchdir $localpath;
-                do_xxsystem("cj-gitmetadata", "restore");
+                do_xxsystem("cj-gitmetadata", "restore",
+                            "--ignore-chown-errors");
             });
     }
     _END_
