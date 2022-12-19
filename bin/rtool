@@ -281,7 +281,7 @@ package rtool::_GitrepoHandler {
             xxwaitpid xfork_(
                 sub {
                     xchdir $localpath;
-                    xxsystem "git", "pull";
+                    do_xxsystem("git", "pull");
                 });
             $do_post_update->($self, $localpath);
         } else {
@@ -304,8 +304,8 @@ package rtool::_GitrepoHandler {
             }
             if ($self->required or $repo_exists_on_remote) {
                 mkdir dirname $localpath;
-                xxsystem "git", "clone", "$username\@$host:$remotepath",
-                    $localpath;
+                do_xxsystem("git", "clone", "$username\@$host:$remotepath",
+                            $localpath);
                 $do_post_update->($self, $localpath);
             }
         }
@@ -349,7 +349,7 @@ package rtool::ScratchHandler {
         xxwaitpid xfork_(
             sub {
                 xchdir $localpath;
-                xxsystem "cj-gitmetadata", "restore";
+                do_xxsystem("cj-gitmetadata", "restore");
             });
     }
     _END_
