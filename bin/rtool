@@ -280,6 +280,7 @@ package rtool::_GitrepoHandler {
                 user_exists_on_host($username, $host) && do {
                     my $shellcode =
                         'test -d '.singlequote_sh("$remotepath/.git").
+                        ' && ! test -L '.singlequote_sh("$remotepath").
                         ' && cd '.singlequote_sh($remotepath).
                         ' && git rev-parse HEAD';
                     warn "shellcode = <$shellcode>" if $verbose;
