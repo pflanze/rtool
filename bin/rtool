@@ -213,9 +213,6 @@ package rtool::ChjizeLogsHandler {
 
     sub run ($self, $host) {
         rsync_dir("root", $host, "/opt/chj/chjize/.log", "chjize-.log");
-        run_ssh_command_capture(
-            "root", $host, "TZ=Europe/Zurich ls -lrt /opt/chj/chjize/.log/",
-            "chjize-.log l.txt");
     }
     _END_
 }
@@ -362,8 +359,7 @@ for (@handlernames) {
 
 our %handlers= (
     crontab => CrontabHandler(),
-    chjize => ChjizeLogsHandler(), # I am not retrieving the time stamps now.
-    # ^ XX does need cj-gitmetadata or ordering wouldn't be clear!!
+    chjize => ChjizeLogsHandler(),
     dpkgselections=> DpkgSelectionsHandler(),
     etc=> GitrepoHandler(1, "root", "/etc", "etc"),
     scratch=> [
