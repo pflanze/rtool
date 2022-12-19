@@ -367,28 +367,6 @@ for (@handlernames) {
     "rtool::${_}::constructors"->import;
 }
 
-our %handlers= (
-    crontab => CrontabHandler(),
-    chjize => ChjizeLogsHandler(),
-    dpkgselections=> DpkgSelectionsHandler(),
-    etc=> GitrepoHandler(1, "root", "/etc", "etc"),
-    scratch=> [
-        ScratchHandler(0, "root"),
-        ScratchHandler(0, "chris"),
-        ],
-    rootbin => GitrepoHandler(0, "root", "bin", "root/bin"),
-    # ^ really not require?
-    bashhistory=> [
-        BashhistoryHandler("root"),
-        BashhistoryHandler("chris"),
-    ],
-    users=>
-    # even though also other keys have user stuff, like bashhistory; shrug.
-    [
-        GitrepoHandler(0, "chris", "bin", "chris/bin"),
-    ],
-    );
-
 my $action = shift @ARGV;
 
 $action eq "sync"
@@ -400,6 +378,41 @@ $action eq "sync"
 my $config = require $config_path;
 
 my $hosts = @ARGV ? [@ARGV] : $config->{hosts};
+my $admin_user_names = $config->{admin_user_names} // [];
+
+our %handlers= (
+    crontab => CrontabHandler(),
+    chjize => ChjizeLogsHandler(),
+    dpkgselections=> DpkgSelectionsHandler(),
+    etc=> GitrepoHandler(1, "root", "/etc", "etc"),
+    scratch=> [
+        ScratchHandler(0, "root"),
+        (
+         map {
+             ScratchHandler(0, $_),
+         } @$admin_user_names
+        )
+        ],
+    rootbin => GitrepoHandler(0, "root", "bin", "root/bin"),
+    # ^ really not require?
+    bashhistory=> [
+        BashhistoryHandler("root"),
+        (
+         map {
+             BashhistoryHandler($_),
+         } @$admin_user_names
+        )
+    ],
+    users=>
+    # even though also other keys have user stuff, like bashhistory; shrug.
+    [
+     (
+      map {
+          GitrepoHandler(0, $_, "bin", "$_/bin"),
+      } @$admin_user_names
+     )
+    ],
+    );
 
 my %config_hosts = map { $_=> 1 } @{ $config->{hosts} };
 
