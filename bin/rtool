@@ -300,7 +300,8 @@ package rtool::_GitrepoHandler {
             };
             if ($self->required) {
                 $repo_exists_on_remote
-                    or die "repository is required but doesn't exist on the remote or has no HEAD: ".show($self);
+                    or die("repository is required but doesn't exist ".
+                           "on the remote or has no HEAD: ".show($self));
             }
             if ($self->required or $repo_exists_on_remote) {
                 mkdir dirname $localpath;
@@ -374,7 +375,8 @@ $action eq "sync"
     or usage "only 'sync' is currently a supported action";
 
 -d ".git"
-    or usage "Missing directory .git, must be run from the root of a Git repository";
+    or usage("Missing directory .git, must be run from the root ".
+             "of a Git repository");
 
 my $config = require $config_path;
 
