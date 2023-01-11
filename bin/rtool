@@ -23,6 +23,7 @@ use Getopt::Long;
 use FP::Show;
 use Chj::xperlfunc ":all";
 use Chj::singlequote ":all";
+use Chj::xIOUtil qw(xputfile_utf8);
 #use Chj::ruse;
 #use Chj::Backtrace; 
 use FP::Repl; use FP::Repl::Trap; #
@@ -440,6 +441,9 @@ for my $host (@$hosts) {
 }
 
 unless ($opt_dry) {
+    # Do not record time stamps of files that have no file backing on the server:
+    xputfile_utf8 ".METADATA-v2.ignore", join "", map {"$_\n"} glob "*/selections";
+
     xxsystem "git", "add", ".";
     xxsystem "cj-gitmetadata", "save";
     xxsystem "git", "add", ".";
